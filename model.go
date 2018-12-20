@@ -98,6 +98,51 @@ func (m *Model) Insert(data interface{}) (int64, error) {
 	return 0, fmt.Errorf("insert data type is invalid, type must be object pointer or map[string]interface{}")
 }
 
+func (m *Model) MInsert(data ...interface{}) (int64, error) {
+	dataLen := len(data)
+	if dataLen == 0 {
+		return 0, fmt.Errorf("params error")
+	}
+
+	t := reflect.TypeOf(data[0])
+
+	switch t.Kind() {
+	case reflect.Ptr:
+		columns := m.getReflectColumns(t)
+		values := make([]interface{}, 0, dataLen)
+		for i := 0; i < dataLen; i++ {
+			values = append(values, m.getReflectValues(reflect.ValueOf(data[i]), t))
+		}
+		return m.BatchInsert(columns, values)
+	case reflect.Map:
+		switch data[0].(type) {
+		case map[string]interface{}:
+			columns := make([]string, 0, dataLen)
+			values := make([]interface{}, 0, dataLen)
+			for column, _ := range data[0].(map[string]interface{}) {
+				columns = append(columns, column)
+			}
+
+			subMapLen := len(data[0].(map[string]interface{}))
+			for i := 0; i < dataLen; i++ {
+				if len(data[i].(map[string]interface{})) != subMapLen {
+					return 0, fmt.Errorf("params map key is not the same")
+				}
+				subMapValues := make([]interface{}, 0, subMapLen)
+				for _, column := range columns {
+					subMapValues = append(subMapValues, data[i].(map[string]interface{})[column])
+				}
+				values = append(values, subMapValues)
+			}
+			return m.BatchInsert(columns, values)
+		default:
+		}
+	default:
+	}
+
+	return 0, fmt.Errorf("minsert data type is invalid, type must be object pointer or map[string]interface{}")
+}
+
 // 更新：基于exp表达式更新data数据
 func (m *Model) Update(data interface{}, exp interface{}) (int64, error) {
 	t := reflect.TypeOf(data)
@@ -147,8 +192,8 @@ func (m *Model) BatchInsert(columns []string, params []interface{}) (int64, erro
 	var lastInsertId int64
 
 	paramsLen := len(params)
-	count, frac := math.Modf(float64(paramsLen) / maxBatchLimit)
-	if frac > 0.000001 {
+	count, fraction := math.Modf(float64(paramsLen) / maxBatchLimit)
+	if fraction > 0.000001 {
 		count += 1
 	}
 
@@ -344,6 +389,71 @@ func (m *Model) getReflectMap(v reflect.Value, t reflect.Type) map[string]interf
 	return params
 }
 
+func (m *Model) getReflectColumns(t reflect.Type) []string {
+	tElem := t.Elem()
+	num := tElem.NumField()
+
+	columns := make([]string, 0, num)
+	for i := 0; i < num; i++ {
+		dbTag := tElem.Field(i).Tag.Get("db")
+		name := tElem.Field(i).Name
+
+		switch dbTag {
+		case dbTagDiscard:
+			continue
+		case dbTagEmpty:
+			columns = append(columns, name)
+		default:
+			var isAutoIncrement bool
+			tagSlice := strings.Split(dbTag, " ")
+			for _, v := range tagSlice {
+				if v == dbTagAutoIncrement {
+					isAutoIncrement = true
+					break
+				}
+			}
+			if !isAutoIncrement {
+				columns = append(columns, tagSlice[0])
+			}
+		}
+	}
+
+	return columns
+}
+
+func (m *Model) getReflectValues(v reflect.Value, t reflect.Type) []interface{} {
+	tElem := t.Elem()
+	vElem := v.Elem()
+	num := tElem.NumField()
+	values := make([]interface{}, 0, num)
+
+	for i := 0; i < num; i++ {
+		dbTag := tElem.Field(i).Tag.Get("db")
+		value := vElem.Field(i).Interface()
+
+		switch dbTag {
+		case dbTagDiscard:
+			continue
+		case dbTagEmpty:
+			values = append(values, value)
+		default:
+			var isAutoIncrement bool
+			tagSlice := strings.Split(dbTag, " ")
+			for _, v := range tagSlice {
+				if v == dbTagAutoIncrement {
+					isAutoIncrement = true
+					break
+				}
+			}
+			if !isAutoIncrement {
+				values = append(values, value)
+			}
+		}
+	}
+
+	return values
+}
+
 // 基于表达式获取并构建where语句
 func (m *Model) getWhereByInterface(exp interface{}) (string, error) {
 	var result string
@@ -397,6 +507,11 @@ func (m *Model) batchInsertByLimit(columns []string, params []interface{}) (int6
 		return 0, fmt.Errorf("batch insert too large, length: %v", paramsLen)
 	}
 
+	// 防止字段是关键字，所以加上转移符号，如：`status`
+	for key, value := range columns {
+		columns[key] = fmt.Sprintf("`%s`", value)
+	}
+
 	data := make([]string, paramsLen)
 	for i, v := range params {
 		val := reflect.ValueOf(v)
@@ -406,11 +521,12 @@ func (m *Model) batchInsertByLimit(columns []string, params []interface{}) (int6
 
 		var subVal string
 		subData := make([]string, 0, val.Len())
-
 		for j := 0; j < val.Len(); j++ {
 			switch t := val.Index(j).Interface().(type) {
 			case string:
 				subVal = fmt.Sprintf("'%s'", t)
+			case NullString:
+				subVal = fmt.Sprintf("'%s'", t.String)
 			case sql.NullString:
 				subVal = fmt.Sprintf("'%s'", t.String)
 			default:
