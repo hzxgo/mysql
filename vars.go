@@ -2,6 +2,7 @@ package mysql
 
 import (
 	"database/sql"
+	"errors"
 )
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -11,9 +12,8 @@ const (
 )
 
 const (
-	dbTagEmpty         = ""               // 空
-	dbTagDiscard       = "-"              // 丢弃
-	dbTagAutoIncrement = "auto_increment" // 自动递增
+	dbTagEmpty   = ""  // 空
+	dbTagDiscard = "-" // 丢弃
 )
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -37,3 +37,11 @@ type NullInt64 struct {
 type NullBool struct {
 	sql.NullBool
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+
+// errors
+var (
+	errParamsBad   = errors.New("mysql: params error")
+	errTypeInvalid = errors.New("mysql: data type is invalid, type must be pointer or map[string]interface{}")
+)
