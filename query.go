@@ -11,27 +11,27 @@ type Query struct {
 }
 
 func (q *Query) Form(tableName string) *Query {
-	q.Sql = fmt.Sprintf("%s FROM %s", q.Sql, tableName)
+	q.Sql = fmt.Sprintf("%s FROM `%s`", q.Sql, tableName)
 	return q
 }
 
 func (q *Query) LeftJoin(tableName, on string) *Query {
-	q.Sql = fmt.Sprintf("%s LEFT JOIN (%s) ON (%s)", q.Sql, tableName, on)
+	q.Sql = fmt.Sprintf("%s LEFT JOIN (`%s`) ON (%s)", q.Sql, tableName, on)
 	return q
 }
 
 func (q *Query) OrderBy(field string) *Query {
-	q.AfterWhere = fmt.Sprintf("%s ORDER BY %s", q.AfterWhere, field)
+	q.AfterWhere = fmt.Sprintf("%s ORDER BY `%s`", q.AfterWhere, field)
 	return q
 }
 
 func (q *Query) OrderAsc(field string) *Query {
-	q.AfterWhere = fmt.Sprintf("%s ORDER BY %s ASC", q.AfterWhere, field)
+	q.AfterWhere = fmt.Sprintf("%s ORDER BY `%s` ASC", q.AfterWhere, field)
 	return q
 }
 
 func (q *Query) OrderDesc(field string) *Query {
-	q.AfterWhere = fmt.Sprintf("%s ORDER BY %s DESC", q.AfterWhere, field)
+	q.AfterWhere = fmt.Sprintf("%s ORDER BY `%s` DESC", q.AfterWhere, field)
 	return q
 }
 

@@ -216,11 +216,13 @@ func (m *Model) BatchInsert(columns []string, params []interface{}) (int64, erro
 
 // 加载一个值
 func (m *Model) LoadValue(rows *sql.Rows, value interface{}) error {
-	if _, err := m.Load(rows, value); err != nil {
+	if count, err := m.Load(rows, value); err != nil {
 		return err
+	} else if count == 0 {
+		return m.ErrNoRows()
+	} else {
+		return nil
 	}
-
-	return nil
 }
 
 // 加载多个值
@@ -230,11 +232,13 @@ func (m *Model) LoadValues(rows *sql.Rows, value interface{}) (int, error) {
 
 // 加载结构体
 func (m *Model) LoadStruct(rows *sql.Rows, value interface{}) error {
-	if _, err := m.Load(rows, value); err != nil {
+	if count, err := m.Load(rows, value); err != nil {
 		return err
+	} else if count == 0 {
+		return m.ErrNoRows()
+	} else {
+		return nil
 	}
-
-	return nil
 }
 
 // 批量加载结构体
@@ -271,7 +275,6 @@ func (m *Model) Load(rows *sql.Rows, value interface{}) (int, error) {
 		if ptr, err := findPtr(columns, elem); err != nil {
 			return 0, err
 		} else {
-			log.Infof("ptr...: %+v", ptr)
 			if err = rows.Scan(ptr...); err != nil {
 				return 0, err
 			}
@@ -413,6 +416,10 @@ func (m *Model) update(params map[string]interface{}, exp interface{}) (int64, e
 // 基于表达式获取并构建where语句
 func (m *Model) getWhereByInterface(exp interface{}) (string, error) {
 	var result string
+
+	if exp == nil {
+		return "", nil
+	}
 
 	switch exp.(type) {
 	case map[string]interface{}:
