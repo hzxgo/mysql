@@ -251,6 +251,7 @@ func (m *Model) Load(rows *sql.Rows, value interface{}) (int, error) {
 	if rows == nil {
 		return 0, errParamsBad
 	}
+	defer rows.Close()
 
 	v := reflect.ValueOf(value)
 	if v.Kind() != reflect.Ptr || v.IsNil() {
@@ -294,10 +295,10 @@ func (m *Model) Load(rows *sql.Rows, value interface{}) (int, error) {
 func (m *Model) IsExist(exp interface{}, field string, value string) (bool, error) {
 	var key string
 	query := m.Select(field).Form(m.TableName)
-	if row, err := m.SelectWhere(query, exp); err != nil {
+	if rows, err := m.SelectWhere(query, exp); err != nil {
 		return false, err
 	} else {
-		if err = row.Scan(&key); err != nil {
+		if _, err = m.Load(rows, &key); err != nil {
 			return false, err
 		}
 		if key == value {
@@ -311,10 +312,10 @@ func (m *Model) IsExist(exp interface{}, field string, value string) (bool, erro
 func (m *Model) Count(exp interface{}) (int, error) {
 	var total int
 	query := m.Select("COUNT(0)").Form(m.TableName)
-	if row, err := m.SelectWhere(query, exp); err != nil {
+	if rows, err := m.SelectWhere(query, exp); err != nil {
 		return 0, err
 	} else {
-		if err = row.Scan(&total); err != nil {
+		if _, err = m.Load(rows, &total); err != nil {
 			return 0, err
 		}
 	}
