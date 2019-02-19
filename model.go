@@ -301,7 +301,7 @@ func (m *Model) IsExist(exp interface{}, field string, value string) (bool, erro
 		if _, err = m.Load(rows, &key); err != nil {
 			return false, err
 		}
-		if key == value {
+		if key == "" || key == value {
 			return false, nil
 		}
 	}
