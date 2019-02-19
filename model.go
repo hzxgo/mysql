@@ -28,7 +28,7 @@ func (m *Model) Select(fields string) *Query {
 	fieldSlice := strings.Split(fields, ",")
 	selectFields := make([]string, len(fieldSlice))
 	for i, field := range fieldSlice {
-		selectFields[i] = fmt.Sprintf("`%s`", strings.TrimSpace(field))
+		selectFields[i] = fmt.Sprintf("%s", strings.TrimSpace(field))
 	}
 	return &Query{
 		Sql: fmt.Sprintf("SELECT %s", strings.Join(selectFields, ", ")),
