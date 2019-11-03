@@ -37,6 +37,11 @@ func Init(dataSource string) error {
 	return nil
 }
 
+// 获取DB
+func GetDB() *sql.DB {
+	return db
+}
+
 func FreeDB() {
 	dbMutex.Lock()
 	defer dbMutex.Unlock()
