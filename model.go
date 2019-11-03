@@ -12,8 +12,7 @@ import (
 
 // 模型：每个业务模型都需要继承该模型
 type Model struct {
-	TableName string  `db:"-" json:"-"`
-	Tx        *sql.Tx `db:"-" json:"-"`
+	Tx *sql.Tx `db:"-" json:"-"`
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -66,7 +65,7 @@ func (m *Model) SelectWhere(query *Query, exp interface{}) (*sql.Rows, error) {
 }
 
 // 插入数据：支持 对象指针类型 和 Map 类型
-func (m *Model) Insert(data interface{}) (int64, error) {
+func (m *Model) Insert(tableName string, data interface{}) (int64, error) {
 	t := reflect.TypeOf(data)
 
 	switch t.Kind() {
@@ -74,12 +73,12 @@ func (m *Model) Insert(data interface{}) (int64, error) {
 		if mapping, err := struct2Map(data); err != nil {
 			return 0, err
 		} else {
-			return m.insert(mapping)
+			return m.insert(mapping, tableName)
 		}
 	case reflect.Map:
 		switch data.(type) {
 		case map[string]interface{}:
-			return m.insert(data.(map[string]interface{}))
+			return m.insert(data.(map[string]interface{}), tableName)
 		default:
 		}
 	default:
@@ -89,7 +88,7 @@ func (m *Model) Insert(data interface{}) (int64, error) {
 }
 
 // 插入多条记录：支持 对象指针类型 和 Map 类型
-func (m *Model) MInsert(data ...interface{}) (int64, error) {
+func (m *Model) MInsert(tableName string, data ...interface{}) (int64, error) {
 	var dataLen int
 	if dataLen = len(data); dataLen == 0 {
 		return 0, errParamsBad
@@ -111,7 +110,7 @@ func (m *Model) MInsert(data ...interface{}) (int64, error) {
 				values = append(values, ptrValues)
 			}
 		}
-		return m.BatchInsert(columns, values)
+		return m.BatchInsert(tableName, columns, values)
 	case reflect.Map:
 		switch data[0].(type) {
 		case map[string]interface{}:
@@ -131,7 +130,7 @@ func (m *Model) MInsert(data ...interface{}) (int64, error) {
 				}
 				values = append(values, subMapValues)
 			}
-			return m.BatchInsert(columns, values)
+			return m.BatchInsert(tableName, columns, values)
 		}
 	}
 
@@ -139,7 +138,7 @@ func (m *Model) MInsert(data ...interface{}) (int64, error) {
 }
 
 // 更新：基于exp表达式更新data数据
-func (m *Model) Update(data interface{}, exp interface{}) (int64, error) {
+func (m *Model) Update(tableName string, data interface{}, exp interface{}) (int64, error) {
 	t := reflect.TypeOf(data)
 
 	switch t.Kind() {
@@ -147,12 +146,12 @@ func (m *Model) Update(data interface{}, exp interface{}) (int64, error) {
 		if mapping, err := struct2Map(data); err != nil {
 			return 0, err
 		} else {
-			return m.update(mapping, exp)
+			return m.update(mapping, exp, tableName)
 		}
 	case reflect.Map:
 		switch data.(type) {
 		case map[string]interface{}:
-			return m.update(data.(map[string]interface{}), exp)
+			return m.update(data.(map[string]interface{}), exp, tableName)
 		default:
 		}
 	default:
@@ -162,7 +161,7 @@ func (m *Model) Update(data interface{}, exp interface{}) (int64, error) {
 }
 
 // 删除：基于exp表达式删除数据
-func (m *Model) Delete(exp interface{}) (int64, error) {
+func (m *Model) Delete(tableName string, exp interface{}) (int64, error) {
 	var result sql.Result
 
 	retWhere, err := m.getWhereByInterface(exp)
@@ -170,7 +169,7 @@ func (m *Model) Delete(exp interface{}) (int64, error) {
 		return 0, err
 	}
 
-	cmd := fmt.Sprintf("DELETE FROM `%v` %v", m.TableName, retWhere)
+	cmd := fmt.Sprintf("DELETE FROM `%v` %v", tableName, retWhere)
 	log.Infof("[MySQL]: %s", cmd)
 
 	if m.Tx == nil {
@@ -187,7 +186,7 @@ func (m *Model) Delete(exp interface{}) (int64, error) {
 }
 
 // 批量插入数据
-func (m *Model) BatchInsert(columns []string, params []interface{}) (int64, error) {
+func (m *Model) BatchInsert(tableName string, columns []string, params []interface{}) (int64, error) {
 	var err error
 	var lastInsertId int64
 
@@ -205,7 +204,7 @@ func (m *Model) BatchInsert(columns []string, params []interface{}) (int64, erro
 			endIndex = (i + 1) * maxBatchLimit
 		}
 
-		lastInsertId, err = m.batchInsertByLimit(columns, params[i*maxBatchLimit:endIndex])
+		lastInsertId, err = m.batchInsertByLimit(columns, params[i*maxBatchLimit:endIndex], tableName)
 		if err != nil {
 			return 0, err
 		}
@@ -292,9 +291,9 @@ func (m *Model) Load(rows *sql.Rows, value interface{}) (int, error) {
 }
 
 // 基于条件表达式判断数据是否存在
-func (m *Model) IsExist(exp interface{}, field string, value string) (bool, error) {
+func (m *Model) IsExist(tableName string, exp interface{}, field string, value string) (bool, error) {
 	var key string
-	query := m.Select(field).Form(m.TableName)
+	query := m.Select(field).Form(tableName)
 	if rows, err := m.SelectWhere(query, exp); err != nil {
 		return false, err
 	} else {
@@ -309,9 +308,9 @@ func (m *Model) IsExist(exp interface{}, field string, value string) (bool, erro
 }
 
 // 统计
-func (m *Model) Count(exp interface{}) (int, error) {
+func (m *Model) Count(tableName string, exp interface{}) (int, error) {
 	var total int
-	query := m.Select("COUNT(0)").Form(m.TableName)
+	query := m.Select("COUNT(0)").Form(tableName)
 	if rows, err := m.SelectWhere(query, exp); err != nil {
 		return 0, err
 	} else {
@@ -329,7 +328,7 @@ func (m *Model) ErrNoRows() error {
 // ---------------------------------------------------------------------------------------------------------------------
 
 // 插入params数据
-func (m *Model) insert(params map[string]interface{}) (int64, error) {
+func (m *Model) insert(params map[string]interface{}, tableName string) (int64, error) {
 	if len(params) == 0 {
 		return 0, errParamsBad
 	}
@@ -365,7 +364,7 @@ func (m *Model) insert(params map[string]interface{}) (int64, error) {
 
 	fields := fmt.Sprintf("`%s`", strings.Join(columns, "`,`"))
 	fieldValues := fmt.Sprintf("'%s'", strings.Join(values, "','"))
-	cmd := fmt.Sprintf("INSERT INTO `%s` (%s) VALUES(%s)", m.TableName, fields, fieldValues)
+	cmd := fmt.Sprintf("INSERT INTO `%s` (%s) VALUES(%s)", tableName, fields, fieldValues)
 	log.Infof("[MySQL]: %s", cmd)
 
 	if m.Tx == nil {
@@ -382,7 +381,7 @@ func (m *Model) insert(params map[string]interface{}) (int64, error) {
 }
 
 // 更新：基于exp表达式更新params数据
-func (m *Model) update(params map[string]interface{}, exp interface{}) (int64, error) {
+func (m *Model) update(params map[string]interface{}, exp interface{}, tableName string) (int64, error) {
 	var result sql.Result
 
 	retWhere, err := m.getWhereByInterface(exp)
@@ -398,7 +397,7 @@ func (m *Model) update(params map[string]interface{}, exp interface{}) (int64, e
 	}
 
 	retSet := strings.Join(setValues, ", ")
-	cmd := fmt.Sprintf("UPDATE `%s` SET %s %s", m.TableName, retSet, retWhere)
+	cmd := fmt.Sprintf("UPDATE `%s` SET %s %s", tableName, retSet, retWhere)
 	log.Infof("[MySQL]: %s", cmd)
 
 	if m.Tx == nil {
@@ -465,7 +464,7 @@ func (m *Model) getWhereItem(join string, exp map[string]interface{}) string {
 	return result
 }
 
-func (m *Model) batchInsertByLimit(columns []string, params []interface{}) (int64, error) {
+func (m *Model) batchInsertByLimit(columns []string, params []interface{}, tableName string) (int64, error) {
 	paramsLen := len(params)
 	if paramsLen > maxBatchLimit {
 		return 0, fmt.Errorf("batch insert too large, length: %v", paramsLen)
@@ -504,7 +503,7 @@ func (m *Model) batchInsertByLimit(columns []string, params []interface{}) (int6
 	var err error
 	var result sql.Result
 	cmd := fmt.Sprintf("INSERT INTO `%s` (%s) VALUES %s",
-		m.TableName, strings.Join(columns, ","), strings.Join(data, ","))
+		tableName, strings.Join(columns, ","), strings.Join(data, ","))
 	log.Infof("[MySQL]: %s", cmd)
 
 	if m.Tx == nil {

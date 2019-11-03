@@ -28,7 +28,7 @@ func Init(dataSource string) error {
 	tmpDB.SetMaxIdleConns(200)
 
 	if err := tmpDB.Ping(); err != nil {
-		tmpDB.Close()
+		_ = tmpDB.Close()
 		return err
 	} else {
 		db = tmpDB
@@ -38,15 +38,25 @@ func Init(dataSource string) error {
 }
 
 // 获取DB
-func GetDB() *sql.DB {
-	return db
+func GetModel(tx ...*sql.Tx) *Model {
+	if len(tx) == 0 {
+		return &Model{}
+	} else {
+		return &Model{Tx: tx[0]}
+	}
 }
 
+// 事务开始
+func Begin() (*sql.Tx, error) {
+	return db.Begin()
+}
+
+// 释放资源
 func FreeDB() {
 	dbMutex.Lock()
 	defer dbMutex.Unlock()
 
 	if db != nil {
-		db.Close()
+		_ = db.Close()
 	}
 }
