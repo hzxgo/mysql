@@ -8,7 +8,7 @@ import (
 )
 
 var (
-	db      *sql.DB
+	DB      *sql.DB
 	dbMutex sync.Mutex
 )
 
@@ -31,24 +31,15 @@ func Init(dataSource string) error {
 		_ = tmpDB.Close()
 		return err
 	} else {
-		db = tmpDB
+		DB = tmpDB
 	}
 
 	return nil
 }
 
 // 获取DB
-func GetModel(tx ...*sql.Tx) *Model {
-	if len(tx) == 0 {
-		return &Model{}
-	} else {
-		return &Model{Tx: tx[0]}
-	}
-}
-
-// 事务开始
-func Begin() (*sql.Tx, error) {
-	return db.Begin()
+func GetDB() *sql.DB {
+	return DB
 }
 
 // 释放资源
@@ -56,7 +47,7 @@ func FreeDB() {
 	dbMutex.Lock()
 	defer dbMutex.Unlock()
 
-	if db != nil {
-		_ = db.Close()
+	if DB != nil {
+		_ = DB.Close()
 	}
 }

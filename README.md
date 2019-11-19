@@ -6,7 +6,7 @@
 * 添加多条记录
 * 更新记录
 * 删除记录
-* 支持事务操作
+* 支持事务操作(Tags v1.0.1版本不支持事务)
 
 ## 使用介绍
 ### 初始化MySQL操作
@@ -36,256 +36,328 @@ import (
 )
 
 type User struct {
-	mysql.Model `db:"-" json:"-"` // db:"-" 表示数据库无该字段
-	ID          int64  `json:"id"` // 默认数据库字段与结构体字段一致
-	// Username string `db:"username"` 映射数据库中的“username”
-	Username    string `json:"username"`
-	Address     string `json:"address"`
-	Sex         int    `json:"sex"`
-	Comment     string `json:"comment"`
-	CreateTime  int64  `json:"create_time"`
-	UpdateTime  int64  `json:"update_time"`
+	ID              int64  `db:"ID"`
+	Username        string // 若不指定 db 中的名称，则默认为字段名称
+	Password        string
+	RealName        string
+	IsAdmin         int
+	State           int
+	CreateTime      int64
+	UpdateTime      int64
+	LatestLoginTime int64
+	LoginTimes      int
+	Comment         mysql.NullString // db字段类型为：text
+	Token           string
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
 
 func NewUser() *User {
-	return &User{
-		Model: mysql.Model{
-			TableName: "ddy_user",
-		},
-	}
+	return &User{}
 }
-```
 
-### 获取单条数据
+// 表名
+func (u *User) TableName() string {
+	return "ddy_user"
+}
 
-```
+// 获取单条数据
 func (u *User) GetSingleByExp(exp map[string]interface{}) error {
 
-	// 获取指定列数据
-	builder := u.Select("ID, Username, Address, Sex, Comment, CreateTime, UpdateTime").Form(u.TableName).Limit(1)
-	rows, err := u.SelectWhere(builder, exp)
+	// 构造查询语句
+	builder := mysql.Select("*").Form(u.TableName()).Limit(1)
+	rows, err := mysql.SelectWhere(builder, exp)
 	if err != nil {
 		return err
 	}
 
 	// 加载数据
-	if err := u.LoadStruct(rows, u); err != nil {
+	if err := mysql.LoadStruct(rows, u); err != nil {
 		return err
 	}
 
 	return nil
 }
-```
 
-### 获取多条数据
+// 获取单条数据
+func (u *User) GetSingleByID(id int64) error {
 
-```
-func (u *User) GetAll() ([]*User, error) {
-	builder := u.Select("ID, Username, Address, Sex, Comment, CreateTime, UpdateTime").Form(u.TableName)
-	rows, err := u.SelectWhere(builder, nil)
+	// 使用原生SQL查询
+	cmd := fmt.Sprintf("SELECT * FROM %s WHERE `ID`=%d LIMIT 1", u.TableName(), id)
+	rows, err := mysql.SelectBySql(cmd)
 	if err != nil {
-		log.Errorf("select where: %v", err)
-		return nil, err
+		return err
 	}
 
 	// 加载数据
-	users := make([]*User, 0, 20)
-	if err := u.LoadStruct(rows, &users); err != nil {
+	if err := mysql.LoadStruct(rows, u); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// 获取单条数据
+func (u *User) GetLimitByExp(exp map[string]interface{}, offset, limit uint64) ([]*User, error) {
+
+	// 构造查询语句(仅获取指定列数据)
+	builder := mysql.Select("`ID`, `Username`, `Password`").Form(u.TableName()).LimitPage(offset, limit)
+	rows, err := mysql.SelectWhere(builder, exp)
+	if err != nil {
 		return nil, err
+	}
+
+	users := make([]*User, 0, limit)
+
+	// 加载数据
+	if count, err := mysql.LoadStructs(rows, &users); err != nil {
+		return nil, err
+	} else {
+		fmt.Println("count: ", count)
 	}
 
 	return users, nil
 }
+
+// 插入单条数据
+// data数据类型：对象指针类型 或 Map 类型
+func (u *User) Insert(data ...interface{}) (int64, error) {
+	var insertData interface{}
+
+	if len(data) > 0 {
+		insertData = data[0]
+	} else {
+		insertData = u
+	}
+
+	return mysql.Insert(u.TableName(), insertData)
+}
+
+// 插入多条数据
+// data数据类型：对象指针类型 或 Map 类型
+func (u *User) MInsert(data ...interface{}) (int64, int64, error) {
+
+	return mysql.MInsert(u.TableName(), data...)
+}
+
+// 插入多条数据
+func (u *User) BatchInsert(columns []string, params []interface{}) (int64, int64, error) {
+
+	return mysql.BatchInsert(u.TableName(), columns, params)
+}
+
+// 更新：基于exp表达式更新data数据
+func (u *User) Update(data interface{}, exp interface{}) (int64, error) {
+
+	return mysql.Update(u.TableName(), data, exp)
+}
+
+// 删除：基于exp表达式删除数据
+func (u *User) Delete(exp interface{}) (int64, error) {
+
+	return mysql.Delete(u.TableName(), exp)
+}
 ```
 
-### 插入操作
-* 指定列插入单条数据 ———— Insert()
-
-    ```
-    now := time.Now().Unix()
-    params := map[string]interface{}{
-        "Username":   "zhang_san",
-        "Comment":    "zhang_san is good boy",
-        "CreateTime": now,
-        "UpdateTime": now,
-    }
-    id, err := model.NewUser().Insert(params)
-    if err != nil {
-        log.Errorf("insert user | %v", err)
-        return
-    }
-    log.Infof("insert id: %d", id)
-    ```
-
-* 指定列插入多条数据 ———— MInsert()
-> **调用MInsert时，不用担心数据量过大的问题，这是因为ORM底层进行了分批批量
-> 插入，目前设置的每批插入500条。所以即使你调用MInsert要求插入1200条，实
-> 际上会分3批进行批量插入。**
-
-    ```
-    now := time.Now().Unix()
-    params1 := map[string]interface{}{
-        "Username":   "zhang_san_1",
-        "Comment":    "zhang_san_1 is good boy",
-        "CreateTime": now, // CreateTime 在 UpdateTime 之前
-        "UpdateTime": now,
-    }
-    params2 := map[string]interface{}{
-        "Username":   "zhang_san_2",
-        "Comment":    "zhang_san_2 is good boy",
-        "UpdateTime": now,
-        "CreateTime": now, // CreateTime 在 UpdateTime 之后
-    }
-    // MInsert 也支持插入一条数据。设计方式类似于Redis的 MSET、HMSET
-    // MInsert 要求每个params中的“key”字段必须一样，但对于“key”的排列顺序无要求
-    latestId, err := model.NewUser().MInsert(params1, params2)
-    if err != nil {
-        log.Errorf("insert user | %v", err)
-        return
-    }
-    log.Infof("insert latestId: %d", latestId)
-    ```
-
-* 插入单条对象数据 ———— Insert()
-
-    ```
-    user := model.NewUser()
-    user.Username = "hezhixiong"
-    user.Address = "shang_hai"
-    user.Sex = 1 // sex: 0.未知、1.男、2.女
-    user.Comment = "Gopher boy"
-    user.CreateTime = time.Now().Unit()
-    user.UpdateTime = user.CreateTime
-    id, err := user.Insert(user)
-    if err != nil {
-        log.Errorf("insert user | %v", err)
-        return
-    }
-    log.Infof("insert id: %d", id)
-    ```
-
-* 插入多条对象数据 ———— Insert()
-> **调用MInsert时，不用担心数据量过大的问题，这是因为ORM底层进行了分批批量
-> 插入，目前设置的每批插入500条。所以即使你调用MInsert要求插入1200条，实
-> 际上会分3批进行批量插入。**
-
-    ```
-    var user1, user2 model.User
-
-    // 赋值需要插入的数据
-    user1.Username = "hezhixiong1"
-    user1.Comment = "Gopher boy"
-    user1.CreateTime = time.Now().Unit()
-    user1.UpdateTime = user.CreateTime
-
-    user2.Username = "hezhixiong2"
-    user2.Comment = "Gopher boy"
-    user2.CreateTime = time.Now().Unit()
-    user2.UpdateTime = user.CreateTime
-
-    latestId, err := model.NewUser().Insert(&user1, &user2)
-    if err != nil {
-        log.Errorf("minsert user | %v", err)
-        return
-    }
-    log.Infof("minsert latestId: %d", latestId)
-    ```
-
-* 批量插入数据 ———— BatchInsert()
-
-    ```
-    columns := []string{"Username", "Sex", "Comment"}
-    values := make([]interface{}, 0, 20)
-    for i:=0; i<20; i++ {
-        values = append(values, []interface{}{"name", i%2, ""})
-    }
-    latestId, err := model.NewUser().BatchInsert(columns, values)
-    if err != nil {
-        log.Errorf("batch insert users | %v", err)
-        return
-    }
-    log.Infof("batch insert users latestId: %d", latestId)
-    ```
-
-### 更新操作
-* 更新指定列值数据
-
-    ```
-    user := model.NewUser()
-    exp := map[string]interface{}{
-        "ID=?": 1,
-        "Sex=?": 0,
-    }
-    params := map[string]interface{}{
-        "Sex": 1,
-        "UpdateTime": time.Now().Unit(),
-    }
-
-    // 原生SQL为：UPDATE `ddy_user` SET `Sex`='1', `UpdateTime`='1545322066' WHERE ID='1' AND Sex='0'
-    affected, err := user.Update(params, exp)
-    if err != nil {
-        log.Errorf("update user | %v", err)
-        return
-    }
-    log.Infof("update user affected: %d", affected)
-    ```
-    ```
-    // 如何实现：UPDATE `ddy_user` SET `Sex`='1', `UpdateTime`='1545322066'
-    // WHERE ID='1' AND (Sex='0' OR Username='hezhixiong')
-    user := model.NewUser()
-    exp := map[string]map[string]interface{}{
-        "AND": {
-            "ID=?": 1,
-        },
-        "OR": {
-            "Sex=?":      0,
-            "Username=?": "hezhixiong",
-        },
-    }
-    params := map[string]interface{}{
-        "Sex": 1,
-        "UpdateTime": time.Now().Unit(),
-    }
-    affected, err := user.Update(params, exp)
-    if err != nil {
-        log.Errorf("update user | %v", err)
-        return
-    }
-    log.Infof("update user affected: %d", affected)
-    ```
-
-* 更新整个对象数据
-
-    ```
-        exp := map[string]interface{}{
-            "ID=?": 1,
-            "Sex=?": 0,
-        }
-        user := model.NewUser()
-        user.Username = "new_name"
-        user.CreateTime = time.Now().Unit()
-        user.UpdateTime = user.CreateTime
-        affected, err := user.Update(params, user)
-        if err != nil {
-            log.Errorf("update user | %v", err)
-            return
-        }
-        log.Infof("update user affected: %d", affected)
-    ```
-
-### 删除操作
+### 演示代码
 
 ```
-user := model.NewUser()
-exp := map[string]interface{}{
-    "ID=?": 1,
+
+func main() {
+
+	testSelect()
+
+	testInsert()
+
+	testBatchInsert()
+
+	testUpdate()
+
+	testDelete()
 }
-affected, err := user.Delete(exp)
-if err != nil {
-    log.Errorf("delete user | %v", err)
-    return
+
+func testSelect() {
+	user := NewUser()
+
+	// 基于表达式获取单条数据
+	exp := map[string]interface{}{
+		"ID = ?": 1,
+	}
+	if err := user.GetSingleByExp(exp); err != nil {
+		log.Errorf("User GetSingleByExp err: %v", err)
+		return
+	}
+	log.Infof("User GetSingleByExp: %+v", user)
+
+	// 基于ID获取单条数据
+	if err := user.GetSingleByID(2); err != nil {
+		log.Errorf("User GetSingleByID err: %v", err)
+		return
+	}
+	log.Infof("User GetSingleByID: %+v", user)
+
+	// 获取翻页数据
+	exp = map[string]interface{}{
+		"ID > ?": 0,
+	}
+	users, err := user.GetLimitByExp(exp, 0, 20)
+	if err != nil {
+		log.Errorf("User GetLimitByExp err: %v", err)
+		return
+	}
+	log.Infof("len(users): %v, users: %+v", len(users), users)
 }
-log.Infof("delete affected: %d", affected)
+
+func testInsert() {
+	user := NewUser()
+
+	// 插入指定列数据，备注：params插入后不会加载至user
+	// 以下实际SQL：
+	// INSERT INTO `ddy_user` (`Username`,`Password`,`IsAdmin`,`CreateTime`,`UpdateTime`,`LatestLoginTime`,`Comment`)
+	//    VALUES('sam','123456','1','1574135084','1574135084','1574135084','')
+	timestamp := time.Now().Unix()
+	params := map[string]interface{}{
+		"Username":        "sam",
+		"Password":        "123456",
+		"IsAdmin":         1,
+		"CreateTime":      timestamp,
+		"UpdateTime":      timestamp,
+		"LatestLoginTime": timestamp,
+		"Comment":         "",
+	}
+	if id, err := user.Insert(params); err != nil {
+		log.Errorf("User Insert err: %v", err)
+		return
+	} else {
+		log.Infof("User Insert Id: %v", id)
+		log.Infof("User: %+v", user)
+	}
+
+	// 插入对象
+	// 以下实际SQL：
+	// INSERT INTO `ddy_user` (`IsAdmin`,`UpdateTime`,`ID`,`RealName`,`State`,`CreateTime`,
+	//    `LatestLoginTime`,`LoginTimes`,`Comment`,`Token`,`Username`,`Password`)
+	//     VALUES('0','0','0','','0','0','0','0','this is test','','test','123')
+	user.Username = "test"
+	user.Password = "123"
+	user.Comment.String = "this is test"
+	if id, err := user.Insert(); err != nil {
+		log.Errorf("User Insert err: %v", err)
+		return
+	} else {
+		user.ID = id
+	}
+}
+
+func testBatchInsert() {
+	user := NewUser()
+
+	timestamp := time.Now().Unix()
+	params1 := map[string]interface{}{
+		"Username":        "test1",
+		"Password":        "123456",
+		"IsAdmin":         1,
+		"CreateTime":      timestamp,
+		"UpdateTime":      timestamp,
+		"LatestLoginTime": timestamp,
+		"Comment":         "",
+	}
+	params2 := map[string]interface{}{
+		"Username":        "test2",
+		"Password":        "123456",
+		"IsAdmin":         1,
+		"CreateTime":      timestamp,
+		"UpdateTime":      timestamp,
+		"LatestLoginTime": timestamp,
+		"Comment":         "",
+	}
+
+	// 插入两个params
+	// 以下实际SQL：
+	// INSERT INTO `ddy_user` (`Username`,`Password`,`IsAdmin`,`CreateTime`,`UpdateTime`,`LatestLoginTime`,`Comment`)
+	//     VALUES ('test1','123456',1,1574136054,1574136054,1574136054,''),
+	//     ('test2','123456',1,1574136054,1574136054,1574136054,'')
+	if id, affected, err := user.MInsert(params1, params2); err != nil {
+		log.Errorf("User MInsert | %v", err)
+		return
+	} else {
+		log.Infof("User MInsert EffectRows: %v, %v", id, affected)
+	}
+
+	user1 := NewUser()
+	user1.Username = "test3"
+	user1.Password = "123"
+	user1.Comment.String = ""
+
+	user2 := NewUser()
+	user2.Username = "test4"
+	user2.Password = "1234"
+	user2.Comment.String = ""
+
+	// 插入两个指针对象
+	// 以下实际SQL：
+	// INSERT INTO `ddy_user` (`ID`,`Username`,`Password`,`RealName`,`IsAdmin`,`State`,
+	//     `CreateTime`,`UpdateTime`,`LatestLoginTime`,`LoginTimes`,`Comment`,`Token`)
+	//      VALUES (0,'test3','123','',0,0,0,0,0,0,'',''),(0,'test4','1234','',0,0,0,0,0,0,'','')
+	if id, affected, err := user1.MInsert(user1, user2); err != nil {
+		log.Errorf("User MInsert | %v", err)
+		return
+	} else {
+		log.Infof("User MInsert EffectRows: %v %v", id, affected)
+	}
+
+	// batch insert
+	// 以下实际SQL：
+	// INSERT INTO `ddy_user` (`Username`,`Password`,`Comment`)
+	//   VALUES ('name_0','123',''),('name_1','123',''),('name_2','123','')
+	columns := []string{"Username", "Password", "Comment"}
+	values := make([]interface{}, 0, 3)
+	for i := 0; i < 3; i++ {
+		values = append(values, []interface{}{fmt.Sprintf("name_%v", i), "123", ""})
+	}
+	id, affected, err := user.BatchInsert(columns, values)
+	if err != nil {
+		log.Errorf("User BatchInsert err: %v", err)
+		return
+	}
+	log.Infof("User BatchInsert id: %v, affected: %v", id, affected)
+}
+
+func testUpdate() {
+	user := NewUser()
+
+	// 以下实际SQL：
+	// UPDATE `ddy_user` SET `Password`='md5(username)'
+	params := map[string]interface{}{
+		"Password": "md5(username)",
+	}
+	affected, err := user.Update(params, nil)
+	if err != nil {
+		log.Errorf("User Update err: %v", err)
+		return
+	}
+	log.Infof("User Update Affected: %v", affected)
+}
+
+func testDelete() {
+	user := NewUser()
+
+	// 以下实际SQL：
+	// DELETE FROM `ddy_user`  WHERE (ID > '5') AND (IsAdmin = '1' OR LoginTimes = '0')
+	exp := map[string]map[string]interface{}{
+		"AND": {
+			"ID > ?": 5,
+		},
+		"OR": {
+			"IsAdmin = ?":    1,
+			"LoginTimes = ?": 0,
+		},
+	}
+	affected, err := user.Delete(exp)
+	if err != nil {
+		log.Errorf("User Delete err: %v", err)
+		return
+	}
+	log.Infof("User Delete Affected: %v", affected)
+}
 ```
